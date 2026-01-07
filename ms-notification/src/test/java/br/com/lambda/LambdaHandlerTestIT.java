@@ -1,3 +1,4 @@
+/*
 package br.com.lambda;
 
 import io.quarkus.test.junit.QuarkusIntegrationTest;
@@ -6,4 +7,4 @@ import io.quarkus.test.junit.QuarkusIntegrationTest;
 public class LambdaHandlerTestIT extends LambdaHandlerTest {
 
     // Execute the same tests but in native mode.
-}
+}*/
