@@ -1,69 +1,167 @@
-# ms-notification
+# NotificationLambda
 
-This project uses Quarkus, the Supersonic Subatomic Java Framework.
+## 📌 Visão Geral
 
-If you want to learn more about Quarkus, please visit its website: <https://quarkus.io/>.
+Este projeto implementa uma **AWS Lambda** escrita em **Java** que atua como **consumidora de mensagens de uma fila SQS** e **publicadora de notificações em um tópico SNS**.
 
-## Running the application in dev mode
+O objetivo principal da Lambda é **processar mensagens de feedback**, transformar essas informações em uma notificação estruturada e **enviar um e-mail (ou outro tipo de notificação configurada no SNS)** para os assinantes do tópico.
 
-You can run your application in dev mode that enables live coding using:
+---
 
-```shell script
-./mvnw quarkus:dev
+## 🧱 Arquitetura Envolvida
+
+Fluxo resumido da solução:
+
+1. Uma aplicação publica mensagens na **AWS SQS**.
+2. A **AWS Lambda NotificationLambda** é acionada automaticamente pela SQS.
+3. A Lambda:
+
+    * Lê as mensagens da fila
+    * Converte o JSON recebido em um DTO
+    * Monta o conteúdo da notificação
+    * Publica a mensagem em um **tópico SNS**
+4. O **SNS** encaminha a notificação para os assinantes (por exemplo, e-mail).
+
+---
+
+## ⚙️ Tecnologias Utilizadas
+
+* **Java 17+**
+* **AWS Lambda**
+* **AWS SQS**
+* **AWS SNS**
+* **AWS SDK v2 (SNS Client)**
+* **Jackson (ObjectMapper)**
+
+---
+
+## 📂 Estrutura da Classe Principal
+
+### Classe: `NotificationLambda`
+
+```java
+public class NotificationLambda implements RequestHandler<SQSEvent, String>
 ```
 
-> **_NOTE:_**  Quarkus now ships with a Dev UI, which is available in dev mode only at <http://localhost:8080/q/dev/>.
+A classe implementa a interface `RequestHandler<SQSEvent, String>`, o que indica que:
 
-## Packaging and running the application
+* **Entrada:** Evento da SQS (`SQSEvent`)
+* **Saída:** Uma `String` indicando o resultado da execução
 
-The application can be packaged using:
+---
 
-```shell script
-./mvnw package
+## ▶️ Método `handleRequest`
+
+```java
+public String handleRequest(SQSEvent event, Context context)
 ```
 
-It produces the `quarkus-run.jar` file in the `target/quarkus-app/` directory.
-Be aware that it’s not an _über-jar_ as the dependencies are copied into the `target/quarkus-app/lib/` directory.
+Este é o método principal executado pela AWS Lambda quando a fila SQS dispara o evento.
 
-The application is now runnable using `java -jar target/quarkus-app/quarkus-run.jar`.
+### 🔄 Passo a Passo da Execução
 
-If you want to build an _über-jar_, execute the following command:
+1. **Início da execução**
 
-```shell script
-./mvnw package -Dquarkus.package.jar.type=uber-jar
+    * Um log é registrado indicando o início do processamento
+
+2. **Iteração das mensagens da SQS**
+
+   ```java
+   for (SQSEvent.SQSMessage msg : event.getRecords())
+   ```
+
+    * A Lambda pode receber **uma ou várias mensagens** em uma única execução
+
+3. **Desserialização do payload**
+
+   ```java
+   FeedbackMessageDto dto = objectMapper.readValue(msg.getBody(), FeedbackMessageDto.class);
+   ```
+
+    * O corpo da mensagem (JSON) é convertido para um DTO Java
+
+4. **Criação do assunto da notificação**
+
+   ```java
+   String subject = "Novo feedback - Urgência: " + dto.urgencia();
+   ```
+
+5. **Criação do corpo da mensagem**
+
+    * Utiliza **Text Blocks** do Java para melhorar a legibilidade
+    * Contém informações como:
+
+        * Descrição
+        * Urgência
+        * Nota
+        * Data de envio
+
+6. **Publicação no SNS**
+
+   ```java
+   snsClient.publish(PublishRequest.builder()
+       .topicArn(topicArn)
+       .subject(subject)
+       .message(body)
+       .build());
+   ```
+
+7. **Logs de sucesso**
+
+    * Confirma que a notificação foi enviada com sucesso para o tópico SNS
+
+8. **Retorno da execução**
+
+   ```java
+   return "Ok";
+   ```
+
+---
+
+## 📦 DTO Esperado (`FeedbackMessageDto`)
+
+O payload da mensagem enviada para a SQS deve seguir a estrutura esperada pelo DTO, por exemplo:
+
+```json
+{
+  "descricao": "Ótimo atendimento",
+  "urgencia": "ALTA",
+  "nota": 9.5,
+  "date": "2025-01-05"
+}
 ```
 
-The application, packaged as an _über-jar_, is now runnable using `java -jar target/*-runner.jar`.
+---
 
-## Creating a native executable
+## ✅ Conclusão
 
-You can create a native executable using:
+Esta Lambda implementa um **padrão de arquitetura orientada a eventos**, promovendo o desacoplamento entre:
 
-```shell script
-./mvnw package -Dnative
-```
+* **Produção de feedbacks (SQS)**
+* **Processamento e orquestração (Lambda)**
+* **Entrega das notificações (SNS)**
 
-Or, if you don't have GraalVM installed, you can run the native executable build in a container using:
+Essa abordagem garante **escalabilidade**, **resiliência** e **baixo acoplamento** entre os serviços da solução.
 
-```shell script
-./mvnw package -Dnative -Dquarkus.native.container-build=true
-```
+---
 
-You can then execute your native executable with: `./target/ms-notification-1.0.0-SNAPSHOT-runner`
+## 🔗 Integração com Outro Repositório
 
-If you want to learn more about building native executables, please consult <https://quarkus.io/guides/maven-tooling>.
+Este projeto faz parte de uma **solução distribuída**, desenvolvida em parceria com outro repositório que contém o **microserviço responsável pela criação e envio dos feedbacks para a fila SQS**.
 
-## Related Guides
+Enquanto este repositório é responsável pelo **processamento das mensagens e envio de notificações (SQS → Lambda → SNS)**, o outro microserviço cuida da **origem dos dados de feedback**.
 
-- AWS Lambda ([guide](https://quarkus.io/guides/aws-lambda)): Write AWS Lambda functions
-- Amazon SQS ([guide](https://docs.quarkiverse.io/quarkus-amazon-services/dev/amazon-sqs.html)): Connect to Amazon SQS messaging queue service
+📌 Repositório parceiro (microserviço de criação de feedback):
+👉 **[Acessar repositório de criação de feedback](https://github.com/lcvinicius/fiap-tech-challenge-parte4)**
 
-## Provided Code
+A integração entre os dois projetos permite uma arquitetura **desacoplada, escalável e orientada a eventos**, onde cada microserviço possui uma responsabilidade bem definida.
 
-### Amazon Lambda Integration example
+---
 
-This example contains a Quarkus Greeting Lambda ready for Amazon.
+## 📄 Licença
 
-[Related guide section...](https://quarkus.io/guides/aws-lambda)
+Este projeto é parte de um desafio educacional da FIAP. Uso livre para fins acadêmicos. Para outros fins, consulte a **MIT License**.
 
+---
 
+✍️ Autor: Vitor
