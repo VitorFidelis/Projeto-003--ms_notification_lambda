@@ -1,13 +1,20 @@
 package br.com.lambda;
 
 import br.com.lambda.dtos.FeedbackMessageDto;
+
+import java.util.logging.Level;
+import java.util.logging.Logger;
+
 import com.amazonaws.services.lambda.runtime.events.SQSEvent;
 import com.amazonaws.services.lambda.runtime.RequestHandler;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+
 import software.amazon.awssdk.services.sns.SnsClient;
 import software.amazon.awssdk.services.sns.model.PublishRequest;
 
-import java.util.logging.Logger;
 
 public class NotificationLambda implements RequestHandler<SQSEvent, String> {
 
