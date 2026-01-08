@@ -49,7 +49,7 @@ public class NotificationLambda implements RequestHandler<SQSEvent, String> {
 
                     Att,
                     Serviço de Notificação
-                    """.formatted(dto.descricao(), dto.urgencia(), dto.nota(), dto.dateEnvio());
+                    """.formatted(dto.descricao(), dto.urgencia(), dto.nota(), dto.dataEnvio());
 
                 snsClient.publish(PublishRequest.builder()
                         .topicArn(topicArn)

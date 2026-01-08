@@ -7,7 +7,7 @@ public record FeedbeckMessageDto(
         String descricao,
         Double nota,
         String urgencia,
-        Instant dateEnvio
+        Instant dataEnvio
 ) {
 
 }
