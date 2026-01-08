@@ -16,7 +16,7 @@ jobs:
     env:
       AWS_REGION: us-east-1
       AWS_ACCOUNT_ID: 757367947438
-      TF_ACTION: destroy # Altere para "apply" ou "destroy"
+      TF_ACTION: apply # Altere para "apply" ou "destroy"
       RESOURCE_NAME: hello_lambda
       FUNCTION_NAME: sqs-urgente-sns
       SNS_NAME: feedback_urgente-sns
