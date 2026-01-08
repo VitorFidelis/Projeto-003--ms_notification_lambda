@@ -1,11 +1,9 @@
 package br.com.lambda;
 
-import br.com.lambda.dtos.FeedbeckMessageDto;
-import com.amazonaws.services.lambda.runtime.RequestHandler;
+import br.com.lambda.dtos.FeedbackMessageDto;
 import com.amazonaws.services.lambda.runtime.events.SQSEvent;
+import com.amazonaws.services.lambda.runtime.RequestHandler;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import software.amazon.awssdk.services.sns.SnsClient;
 import software.amazon.awssdk.services.sns.model.PublishRequest;
 
@@ -13,17 +11,26 @@ import java.util.logging.Logger;
 
 public class NotificationLambda implements RequestHandler<SQSEvent, String> {
 
-    private static final ObjectMapper MAPPER = new ObjectMapper()
-            .registerModule(new JavaTimeModule())
-            .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
-
+    private final ObjectMapper objectMapper;
     private final SnsClient snsClient;
     private final String topicArn;
-    private final Logger logger = Logger.getLogger(NotificationLambda.class.getName());
+    private final Logger logger = Logger.getLogger(this.getClass().getName());
 
+    // Construtor padrão (AWS)
     public NotificationLambda() {
-        this.snsClient = SnsClient.create();
-        this.topicArn = System.getenv("SNS_TOPIC_ARN");
+        this(
+                new ObjectMapper()
+                        .registerModule(new JavaTimeModule())
+                        .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS),
+                SnsClient.create(),
+                System.getenv("SNS_TOPIC_ARN"));
+    }
+
+    // Construtor para testes
+    public NotificationLambda(ObjectMapper objectMapper, SnsClient snsClient, String topicArn) {
+        this.objectMapper = objectMapper;
+        this.snsClient = snsClient;
+        this.topicArn = topicArn;
     }
 
     @Override
@@ -32,8 +39,8 @@ public class NotificationLambda implements RequestHandler<SQSEvent, String> {
         try {
             for (SQSEvent.SQSMessage msg : event.getRecords()) {
 
-                FeedbeckMessageDto dto =
-                        MAPPER.readValue(msg.getBody(), FeedbeckMessageDto.class);
+                FeedbackMessageDto dto =
+                        objectMapper.readValue(msg.getBody(), FeedbackMessageDto.class);
 
                 String subject = "Novo feedback - Urgência: " + dto.urgencia();
 
@@ -47,12 +54,7 @@ public class NotificationLambda implements RequestHandler<SQSEvent, String> {
 
                     Att,
                     Serviço de Notificação
-                    """.formatted(
-                        dto.descricao(),
-                        dto.urgencia(),
-                        dto.nota(),
-                        dto.dataEnvio()
-                );
+                    """.formatted(dto.descricao(), dto.urgencia(), dto.nota(), dto.dataEnvio());
 
                 snsClient.publish(PublishRequest.builder()
                         .topicArn(topicArn)
