@@ -35,12 +35,18 @@ public class NotificationLambda implements RequestHandler<SQSEvent, String> {
 
     @Override
     public String handleRequest(SQSEvent event, com.amazonaws.services.lambda.runtime.Context context) {
+        logger.info("Lambda NotificationLambda iniciada");
+        logger.info("Mensagens recebidas da SQS: " + event.getRecords().size());
 
         try {
             for (SQSEvent.SQSMessage msg : event.getRecords()) {
 
-                FeedbackMessageDto dto =
-                        objectMapper.readValue(msg.getBody(), FeedbackMessageDto.class);
+                logger.info("Processando mensagem SQS. MessageId: " + msg.getMessageId());
+                logger.fine("Payload da mensagem: " + msg.getBody());
+
+                FeedbackMessageDto dto = objectMapper.readValue(msg.getBody(), FeedbackMessageDto.class);
+
+                logger.info("Feedback desserializado com sucesso. Urgência: " + dto.urgencia());
 
                 String subject = "Novo feedback - Urgência: " + dto.urgencia();
 
@@ -61,11 +67,14 @@ public class NotificationLambda implements RequestHandler<SQSEvent, String> {
                         .subject(subject)
                         .message(body)
                         .build());
-            }
 
+                logger.info("Mensagem publicada no SNS com sucesso. TopicArn: " + topicArn);
+            }
+            logger.info("Processamento finalizado com sucesso");
             return "Ok";
 
         } catch (Exception e) {
+            logger.log(Level.SEVERE, "Erro ao processar evento SQS", e);
             throw new RuntimeException("Erro ao processar evento SQS", e);
         }
     }
