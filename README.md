@@ -177,6 +177,8 @@ A configuração do OIDC envolve:
 * **AWS SNS**
 * **AWS SDK v2 (SNS Client)**
 * **Jackson (ObjectMapper)**
+* **Terraform**
+* **GitHub Actions** 
 
 ---
 
@@ -309,4 +311,8 @@ Este projeto é parte de um desafio educacional da FIAP. Uso livre para fins aca
 
 ---
 
-✍️ Autor: Vitor
+## 🧩​ Desenvolvedores
+
+- [Vitor Fidelis-Linkedin](https://www.linkedin.com/in/vitorfidelis01)
+      
+- [Janaina-frv-Linkedin](http://www.linkedin.com/in/janaina-v-571ba031)
