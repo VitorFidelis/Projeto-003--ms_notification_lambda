@@ -1,0 +1,390 @@
+name: Deploy or Destroy AWS Lambda on develop
+
+on:
+  push:
+    branches:
+      - develop
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+
+    env:
+      AWS_REGION: us-east-1
+      AWS_ACCOUNT_ID: 757367947438
+      TF_ACTION: destroy # Altere para "apply" ou "destroy"
+      RESOURCE_NAME: hello_lambda
+      FUNCTION_NAME: sqs-urgente-sns
+      SNS_NAME: feedback_urgente-sns
+
+    steps:
+      # Iniciando e configurando
+      - name: Checkout código
+        uses: actions/checkout@v3
+
+      - name: Autenticar com AWS via OIDC
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          role-to-assume: arn:aws:iam::757367947438:role/GitHubOIDCRole
+          aws-region: us-east-1
+
+      - name: Verificar modo de operação
+        run: echo "Iniciando workflow em modo $TF_ACTION"
+
+      - name: Instalar Terraform
+        uses: hashicorp/setup-terraform@v2
+
+      - name: Inicializar Terraform
+        working-directory: infra
+        run: terraform init
+
+      - name: Validar Terraform
+        working-directory: infra
+        run: terraform validate
+
+      # Verificar existência da IAM Role
+      - name: Verificar existência da IAM Role
+        id: iam_role_check
+        run: |
+          ROLE_NAME="lambda-java-sqs-sns-role"
+          if aws iam get-role --role-name "$ROLE_NAME" >/dev/null 2>&1; then
+            echo "✅ IAM Role encontrada"
+            echo "role_exists=true" >> $GITHUB_OUTPUT
+            echo "role_name=$ROLE_NAME" >> $GITHUB_OUTPUT
+          else
+            echo "⚠️ IAM Role não encontrada"
+            echo "role_exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      # Importar IAM Role
+      - name: Importar IAM Role
+        if: env.TF_ACTION == 'destroy' && steps.iam_role_check.outputs.role_exists == 'true'
+        working-directory: infra
+        run: |
+          echo "Importando IAM Role..."
+          terraform import aws_iam_role.lambda_exec_role "${{ steps.iam_role_check.outputs.role_name }}" || echo "IAM Role já importada ou não existe"
+
+      # Verificar existência da IAM Policy
+      - name: Verificar existência da IAM Policy
+        id: iam_policy_check
+        run: |
+          POLICY_ARN="arn:aws:iam::757367947438:policy/lambda-sqs-sns-policy"
+          if aws iam get-policy --policy-arn "$POLICY_ARN" >/dev/null 2>&1; then
+            echo "✅ IAM Policy encontrada"
+            echo "policy_exists=true" >> $GITHUB_OUTPUT
+            echo "policy_arn=$POLICY_ARN" >> $GITHUB_OUTPUT
+          else
+            echo "⚠️ IAM Policy não encontrada"
+            echo "policy_exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      # Importar IAM Policy
+      - name: Importar IAM Policy
+        if: env.TF_ACTION == 'destroy' && steps.iam_policy_check.outputs.policy_exists == 'true'
+        working-directory: infra
+        run: |
+          echo "Importando IAM Policy..."
+          terraform import aws_iam_policy.lambda_policy "${{ steps.iam_policy_check.outputs.policy_arn }}" || echo "IAM Policy já importada ou não existe"
+
+      # Verificar attachment da IAM Policy na Role
+      - name: Verificar attachment da IAM Policy
+        if: env.TF_ACTION == 'destroy' &&
+          steps.iam_policy_check.outputs.policy_exists == 'true' &&
+          steps.iam_role_check.outputs.role_exists == 'true'
+        id: iam_policy_attachment_check
+        working-directory: infra
+        run: |
+          ROLE_NAME="${{ steps.iam_role_check.outputs.role_name }}"
+          POLICY_ARN="${{ steps.iam_policy_check.outputs.policy_arn }}"
+          
+          # Validação defensiva
+          if [ -z "$ROLE_NAME" ] || [ -z "$POLICY_ARN" ]; then
+            echo "Variáveis obrigatórias não definidas, pulando verificação"
+            echo "policy_attachment_exists=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          ATTACHED=$(aws iam list-attached-role-policies \
+            --role-name "$ROLE_NAME" \
+            --query "AttachedPolicies[?PolicyArn=='$POLICY_ARN'].PolicyArn" \
+            --output text)
+          
+          if [ -n "$ATTACHED" ] && [ "$ATTACHED" != "None" ]; then
+            echo "✅ Attachment IAM Policy encontrado"
+            echo "policy_attachment_exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "⚠️ Attachment IAM Policy não encontrado"
+            echo "policy_attachment_exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      # Importar attachment da IAM Policy
+      - name: Importar attachment da IAM Policy
+        if: env.TF_ACTION == 'destroy' && steps.iam_policy_attachment_check.outputs.policy_attachment_exists == 'true'
+        working-directory: infra
+        run: |
+          ROLE_NAME="${{ steps.iam_role_check.outputs.role_name }}"
+          POLICY_ARN="${{ steps.iam_policy_check.outputs.policy_arn }}"
+          
+          terraform import aws_iam_role_policy_attachment.lambda_policy_attach "${ROLE_NAME}/${POLICY_ARN}" || echo "Attachment já importado ou não existe"
+
+      # Verificar SNS Subscription
+      - name: Verificar SNS Subscription
+        id: get_sns_subscription
+        run: |
+          TOPIC_ARN="arn:aws:sns:${AWS_REGION}:${AWS_ACCOUNT_ID}:${SNS_NAME}"
+          ENDPOINT="janainafrv@hotmail.com"
+          
+          set +e
+          SUB_ARN=$(aws sns list-subscriptions-by-topic --topic-arn "$TOPIC_ARN" \
+            --query "Subscriptions[?Endpoint=='$ENDPOINT'].SubscriptionArn" --output text 2>/dev/null)
+          STATUS=$?
+          set -e
+          
+          if [ $STATUS -ne 0 ]; then
+            echo "⚠️ Tópico $TOPIC_ARN não existe, pulando verificação"
+            echo "exists=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          if [ -n "$SUB_ARN" ] && [ "$SUB_ARN" != "None" ]; then
+            echo "✅ Subscription encontrada: $SUB_ARN"
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "SUB_ARN=$SUB_ARN" >> $GITHUB_ENV
+          else
+            echo "⚠️ Subscription não encontrada"
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      # Importar SNS Subscription se existir
+      - name: Importar SNS Subscription se existir
+        if: env.TF_ACTION == 'destroy' && steps.get_sns_subscription.outputs.exists == 'true'
+        working-directory: infra
+        run: |
+          if [ -n "$SUB_ARN" ]; then
+            echo "Importando SNS Subscription..."
+            terraform import aws_sns_topic_subscription.feedback_email $SUB_ARN
+          else
+            echo "Nenhuma subscription para importar, pulando"
+          fi
+
+      # Verificar existência do SNS
+      - name: Verificar existência de SNS
+        id: sns_check
+        run: |
+          set +e
+          SNS_ARN="arn:aws:sns:$AWS_REGION:$AWS_ACCOUNT_ID:$SNS_NAME"
+          SNS_CHECK=$(aws sns get-topic-attributes --topic-arn "$SNS_ARN" --output text 2>/dev/null)
+          set -e
+          
+          if [ -n "$SNS_CHECK" ]; then
+          echo "✅ SNS encontrado: $SNS_ARN"
+          echo "sns_exists=true" >> $GITHUB_OUTPUT
+          echo "sns_arn=$SNS_ARN" >> $GITHUB_OUTPUT
+          else
+          echo "⚠️ SNS não encontrado."
+          echo "sns_exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      # Importar SNS se existir
+      - name: Importar SNS se existir
+        if: steps.sns_check.outputs.sns_exists == 'true'
+        working-directory: infra
+        run: |
+          echo "Importando SNS para o estado..."
+          terraform import aws_sns_topic.feedback_urgente "${{ steps.sns_check.outputs.sns_arn }}" \
+          || echo "⚠️ SNS já importado ou não existe"
+
+      # Verificar existência da Lambda
+      - name: Verificar existência da Lambda
+        id: lambda_check
+        run: |
+          if aws lambda get-function --function-name $FUNCTION_NAME >/dev/null 2>&1; then
+            echo "✅ Lambda encontrada: $FUNCTION_NAME"
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "⚠️ Lambda não encontrada."
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      # Importar Lambda se existir
+      - name: Importar Lambda se existir
+        if: env.TF_ACTION == 'destroy' && steps.lambda_check.outputs.exists == 'true'
+        working-directory: infra
+        run: |
+          echo "Importando Lambda para o estado..."
+          terraform import aws_lambda_function.${RESOURCE_NAME} ${FUNCTION_NAME} || echo "Lambda já importada ou não existe"
+
+      # Importar Event Source Mapping (Lambda → SQS)
+      - name: Importar Event Source Mapping (Lambda → SQS)
+        if: env.TF_ACTION == 'destroy' && steps.lambda_check.outputs.exists == 'true'
+        working-directory: infra
+        run: |
+          UUID=$(aws lambda list-event-source-mappings \
+          --function-name "$FUNCTION_NAME" \
+          --query "EventSourceMappings[?EventSourceArn=='arn:aws:sqs:${AWS_REGION}:${AWS_ACCOUNT_ID}:feedback_urgente-sqs'].UUID" \
+          --output text)
+          
+          if [ -n "$UUID" ] && [ "$UUID" != "None" ]; then
+          echo "Importando Event Source Mapping: $UUID"
+          terraform import aws_lambda_event_source_mapping.sqs_trigger $UUID
+          else
+          echo "Event Source Mapping não encontrado, pulando import"
+          fi
+
+      ### Destruir recursos na ordem correta
+
+      # Destruir Event Source Mapping Lambda
+      - name: DESTROY - Event Source Mapping (Lambda → SQS)
+        if: env.TF_ACTION == 'destroy' && steps.lambda_check.outputs.exists == 'true'
+        working-directory: infra
+        run: |
+          echo "Destruindo Event Source Mapping (Lambda → SQS)..."
+          terraform destroy -target=aws_lambda_event_source_mapping.sqs_trigger -auto-approve
+
+
+      # Destruir Lambda
+      - name: DESTROY - Executar destroy da Lambda
+        if: env.TF_ACTION == 'destroy' && steps.lambda_check.outputs.exists == 'true'
+        working-directory: infra
+        run: |
+          echo "Destruindo Lambda..."
+          terraform destroy -target=aws_lambda_function.${RESOURCE_NAME} -auto-approve
+
+      # Destruir SNS Subscription
+      - name: DESTROY - SNS Subscription (email)
+        if: env.TF_ACTION == 'destroy' && steps.get_sns_subscription.outputs.exists == 'true'
+        working-directory: infra
+        run: |
+          echo "Destruindo SNS Subscription (email)..."
+          terraform destroy -target=aws_sns_topic_subscription.feedback_email -auto-approve
+
+      # Destruir SNS
+      - name: DESTROY - Executar destroy da SNS
+        if: env.TF_ACTION == 'destroy' && steps.sns_check.outputs.sns_exists == 'true'
+        working-directory: infra
+        run: |
+          echo "Destruindo SNS..."
+          terraform destroy -target=aws_sns_topic.feedback_urgente -auto-approve
+
+      # Destruir attachment da IAM Policy (se existir)
+      - name: DESTROY - Destruir attachment da IAM Policy
+        if: env.TF_ACTION == 'destroy' && steps.iam_policy_attachment_check.outputs.policy_attachment_exists == 'true'
+        working-directory: infra
+        run: |
+          echo "Destruindo attachment da IAM Policy..."
+          terraform destroy -target=aws_iam_role_policy_attachment.lambda_policy_attach -auto-approve || echo "Attachment não encontrado ou já destruído"
+
+      # Destruir IAM Policy
+      - name: DESTROY - Destruir IAM Policy
+        if: env.TF_ACTION == 'destroy' && steps.iam_policy_check.outputs.policy_exists == 'true'
+        working-directory: infra
+        run: |
+          echo "Destruindo IAM Policy..."
+          terraform destroy -target=aws_iam_policy.lambda_policy -auto-approve || echo "Policy não encontrada ou já destruída"
+
+      # Destruir IAM Role
+      - name: DESTROY - Destruir IAM Role
+        if: env.TF_ACTION == 'destroy' && steps.iam_role_check.outputs.role_exists == 'true'
+        working-directory: infra
+        run: |
+          echo "Destruindo IAM Role..."
+          terraform destroy -target=aws_iam_role.lambda_exec_role -auto-approve || echo "Role não encontrada ou já destruída"
+
+      ### Criando recursos na ordem correta
+
+      # Criar SNS
+      - name: APPLY - Executar apply da SNS
+        if: env.TF_ACTION == 'apply' && steps.sns_check.outputs.sns_exists == 'false'
+        working-directory: infra
+        run: |
+          echo "Criando SNS..."
+          terraform apply -target=aws_sns_topic.feedback_urgente -auto-approve
+
+      # Criar SNS Subscription (email)
+      - name: APPLY - SNS Subscription (email)
+        if: env.TF_ACTION == 'apply' && steps.get_sns_subscription.outputs.exists == 'false'
+        working-directory: infra
+        run: |
+          echo "Criando SNS Subscription (email)..."
+          terraform apply \
+            -target=aws_sns_topic_subscription.feedback_email \
+            -auto-approve
+
+      # Criar ou importar IAM Role
+      - name: APPLY - Criar ou importar IAM Role
+        if: env.TF_ACTION == 'apply'
+        working-directory: infra
+        run: |
+          if [ "${{ steps.iam_role_check.outputs.role_exists }}" == "true" ]; then
+            echo "IAM Role já existe, importando..."
+            terraform import aws_iam_role.lambda_exec_role lambda-java-sqs-sns-role || echo "IAM Role já importada"
+          else
+            echo "Criando IAM Role..."
+            terraform apply -target=aws_iam_role.lambda_exec_role -auto-approve
+          fi
+
+      # Criar ou importar IAM Policy
+      - name: APPLY - Criar ou importar IAM Policy
+        if: env.TF_ACTION == 'apply'
+        working-directory: infra
+        run: |
+          if [ "${{ steps.iam_policy_check.outputs.policy_exists }}" == "true" ]; then
+            echo "IAM Policy já existe, importando..."
+            terraform import aws_iam_policy.lambda_policy arn:aws:iam::757367947438:policy/lambda-sqs-sns-policy || echo "IAM Policy já importada"
+          else
+            echo "Criando IAM Policy..."
+            terraform apply -target=aws_iam_policy.lambda_policy -auto-approve
+          fi
+
+      # Criar attachment da IAM Policy na Role
+      - name: APPLY - Criar attachment da IAM Policy
+        if: env.TF_ACTION == 'apply'
+        working-directory: infra
+        run: |
+          echo "Criando attachment da IAM Policy na Role..."
+          terraform apply \
+            -target=aws_iam_role_policy_attachment.lambda_policy_attach \
+            -target=aws_iam_role_policy_attachment.lambda_basic_exec \
+            -target=aws_iam_role_policy_attachment.lambda_vpc_access \
+            -auto-approve
+
+      # Criar Lambda
+      - name: Instalar Java e compilar (modo apply)
+        if: env.TF_ACTION == 'apply'
+        uses: actions/setup-java@v3
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Build Lambda com Maven (fat jar)
+        if: env.TF_ACTION == 'apply'
+        working-directory: lambda
+        run: mvn clean package -U -DskipTests
+
+      - name: Copiar JAR da Lambda
+        if: env.TF_ACTION == 'apply'
+        run: |
+          mkdir -p infra/build/lambda
+          cp lambda/target/ms-notification.jar infra/build/lambda/ms-notification.jar
+
+      - name: Executar apply da Lambda
+        if: env.TF_ACTION == 'apply' && steps.lambda_check.outputs.exists == 'false'
+        working-directory: infra
+        run: |
+          echo "Criando Lambda..."
+          terraform apply -target=aws_lambda_function.${RESOURCE_NAME} -auto-approve
+
+      # Criar Event Source Mapping (Lambda → SQS)
+      - name: APPLY - Event Source Mapping (Lambda → SQS)
+        if: env.TF_ACTION == 'apply'
+        working-directory: infra
+        run: |
+          echo "Criando Event Source Mapping entre Lambda e SQS..."
+          terraform apply \
+            -target=aws_lambda_event_source_mapping.sqs_trigger \
+            -auto-approve
+

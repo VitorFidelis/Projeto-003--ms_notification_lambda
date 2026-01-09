@@ -8,22 +8,158 @@ O objetivo principal da Lambda é **processar mensagens de feedback**, transform
 
 ---
 
-## 🧱 Arquitetura Envolvida
+## 📐 Arquitetura do Projeto
 
-Fluxo resumido da solução:
+Este projeto implementa uma arquitetura serverless na AWS para processamento e envio de notificações por e-mail, utilizando os seguintes serviços:
 
-1. Uma aplicação publica mensagens na **AWS SQS**.
-2. A **AWS Lambda NotificationLambda** é acionada automaticamente pela SQS.
+- Amazon SQS: fila responsável por receber as mensagens de entrada.
+
+- AWS Lambda: função que consome as mensagens da fila SQS, processa o conteúdo e formata o e-mail.
+
+- Amazon SNS: serviço responsável por publicar e entregar o e-mail formatado aos assinantes.
+
+- Amazon SNS Subscription (Email): inscrição que define o endereço de e-mail que receberá as notificações.
+
+Fluxo da Arquitetura
+
+1. Uma mensagem é enviada para a fila SQS.
+
+2. A Lambda é acionada automaticamente ao detectar mensagens na fila.
+
 3. A Lambda:
 
-    * Lê as mensagens da fila
-    * Converte o JSON recebido em um DTO
-    * Monta o conteúdo da notificação
-    * Publica a mensagem em um **tópico SNS**
-4. O **SNS** encaminha a notificação para os assinantes (por exemplo, e-mail).
+    - Processa o payload recebido
+
+    - Formata o conteúdo do e-mail
+
+4. O e-mail formatado é publicado em um tópico SNS.
+
+5. O SNS envia o e-mail para os endereços configurados como subscribers.
+
+Essa abordagem garante desacoplamento, escalabilidade e baixo custo operacional.
+
+---
+## 🧱 Infraestrutura como Código (Terraform)
+
+Toda a infraestrutura do projeto é gerenciada via Terraform, permitindo versionamento, reprodutibilidade e automação do provisionamento.
+
+***Principais arquivos Terraform***
+
+- main.tf
+    
+    Arquivo principal que orquestra os recursos e providers.
+
+- variables.tf
+
+  Define as variáveis utilizadas no projeto.
+
+- outputs.tf
+
+  Exporta informações úteis após o provisionamento.
+
+- lambda.tf
+
+  Define a função Lambda, permissões IAM e integração com o SQS.
+
+- sns.tf
+
+  Criação do tópico SNS e suas subscriptions (e-mail).
+
+- iam.tf
+
+    Roles e policies necessárias para Lambda, SNS e SQS.
+
+- data.tf
+
+    Mapeamento de dados necessarios para rodar o GithubAction e outros.
+
+---
+📧 Configuração do E-mail de Subscription do SNS
+
+O endereço de e-mail que receberá as notificações é configurado no arquivo sns.tf, no recurso aws_sns_topic_subscription.
+
+Exemplo:
+
+`
+resource "aws_sns_topic_subscription" "feedback_email" {
+topic_arn = aws_sns_topic.feedback_urgente.arn
+protocol  = "email"
+endpoint  = "janainafrv@gmail.com" # endereço que vai receber as mensagens
+}
+´`
+
+⚠️ Importante:
+
+- Após o terraform apply, a AWS enviará um e-mail de confirmação para o endereço configurado.
+
+- O envio de mensagens só começará após a confirmação da subscription clicando no link recebido por e-mail.
 
 ---
 
+## 🚀 Pipeline de Deploy (GitHub Actions)
+
+O deploy da infraestrutura é feito automaticamente através de uma GitHub Action, utilizando Terraform.
+
+**Arquivo da Pipeline**
+
+- .github/workflows/deploy-or-destroy.yml
+
+Esse workflow é responsável por executar:
+
+- terraform init
+
+- terraform plan
+
+- terraform apply ou terraform destroy, dependendo da variável configurada.
+
+**Variável**: TF_ACTION
+
+Para subir (provisionar) o projeto na AWS, é necessário:
+
+1. Editar o arquivo:
+
+`.github/workflows/deploy-or-destroy.yml`
+
+
+2. Alterar a variável:
+
+`TF_ACTION: apply`
+
+
+3. Fazer commit da alteração.
+
+Subir o commit na branch **develop**.
+
+🔁 O pipeline será acionado automaticamente e realizará o deploy da infraestrutura.
+
+Caso seja necessário destruir os recursos, basta alterar o valor para:
+
+`TF_ACTION: destroy`
+
+---
+## 🔐 Autenticação com AWS via OIDC (GitHub Actions)
+
+Este projeto utiliza OIDC (OpenID Connect) para autenticação segura entre o GitHub Actions e a AWS, eliminando a necessidade de armazenar credenciais estáticas (Access Key e Secret Key).
+
+Como funciona
+
+* O GitHub Actions assume uma IAM Role na AWS usando OIDC.
+* Essa role possui permissões específicas para executar o Terraform.
+* A autenticação ocorre de forma temporária e segura durante a execução da pipeline.
+
+Benefícios do OIDC
+
+* 🔒 Maior segurança (sem secrets sensíveis no repositório)
+* ♻️ Credenciais temporárias
+* 📋 Controle granular de permissões via IAM
+* ✅ Padrão recomendado pela AWS
+
+A configuração do OIDC envolve:
+
+* Provider OIDC do GitHub na AWS
+* IAM Role com trust policy para o repositório/branch
+* Permissões necessárias para criação dos recursos via Terraform
+---
 ## ⚙️ Tecnologias Utilizadas
 
 * **Java 17+**

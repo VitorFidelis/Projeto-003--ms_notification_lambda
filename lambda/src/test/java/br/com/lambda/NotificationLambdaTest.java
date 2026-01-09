@@ -46,7 +46,7 @@ public class NotificationLambdaTest {
                           "descricao": "Ótimo atendimento",
                           "urgencia": "ALTA",
                           "nota": 9.5,
-                          "date": "2025-01-05T10:30:00"
+                          "dataEnvio": "2025-01-05T10:30:00Z"
                         }
                         """);
 
