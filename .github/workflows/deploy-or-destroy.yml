@@ -136,7 +136,7 @@ jobs:
         id: get_sns_subscription
         run: |
           TOPIC_ARN="arn:aws:sns:${AWS_REGION}:${AWS_ACCOUNT_ID}:${SNS_NAME}"
-          ENDPOINT="janainafrv@hotmail.com"
+          ENDPOINT="email@email.com"
           
           set +e
           SUB_ARN=$(aws sns list-subscriptions-by-topic --topic-arn "$TOPIC_ARN" \
