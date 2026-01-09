@@ -5,5 +5,5 @@ resource "aws_sns_topic" "feedback_urgente" {
 resource "aws_sns_topic_subscription" "feedback_email" {
   topic_arn = aws_sns_topic.feedback_urgente.arn
   protocol  = "email"
-  endpoint  = "janainafrv@gmail.com"  # endereço que vai receber as mensagens
+  endpoint  = "email@email.com"  # endereço que vai receber as mensagens
 }
